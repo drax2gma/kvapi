@@ -4,8 +4,6 @@
 *.dll
 *.so
 *.dylib
-kvapi
-kvclient
 
 # Test binary, built with `go test -c`
 *.test
@@ -24,3 +22,11 @@ go.work
 .vscode/
 *.swp
 *.swo 
+
+# Build util files
+.build_id
+.last_build_id
+
+# Binary files
+kvapi-*
+kvclient-*

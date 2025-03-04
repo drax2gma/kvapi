@@ -17,7 +17,8 @@ The application is a simple HTTP REST API server that allows storing key-value p
 
 The application includes version information which is injected during the build process:
 
-- Version format: `0.1.HEX` (where HEX is the UNIX epoch time in hexadecimal format)
+- Version format: `0.1.BUILD_ID` (where BUILD_ID is derived from a timestamp in hexadecimal format)
+- Build ID is consistent for all components built together in a single make invocation
 - Build time: Automatically captured during compilation
 - Git commit: Automatically detected from the repository
 
@@ -219,6 +220,8 @@ The project's Makefile supports the following commands:
 | `make build-all` | Build both server and client |
 | `make build-all-linux` | Build both server and client for Linux |
 | `make clean` | Remove generated executable files |
+| `make clean-version` | Clean build ID (forces new version on next build) |
+| `make clean-all` | Clean both executables and build ID |
 | `make run` | Run the server (default port `:8080`) |
 | `make run-secure` | Run the server with access restricted to local network (192.168.0.0/16) |
 | `make run-local` | Run the server with access restricted to local machine (127.0.0.1/32) |
@@ -580,3 +583,39 @@ This command will:
 2. Send a GET command for the key "config"
 3. Wait up to 3.5 seconds for a response
 4. Format and display the response with color coding
+
+## Building from Source
+
+The project includes a simplified Makefile to streamline cross-platform builds:
+
+### Build Commands
+
+| Command | Description |
+|---------|-------------|
+| `make build` | Build for current platform |
+| `make build-linux` | Build for Linux (amd64) |
+| `make build-windows` | Build for Windows (amd64) |
+| `make build-osx` | Build for macOS (amd64) |
+| `make build-arm` | Build for ARM (arm64) |
+| `make build-all` | Build for all platforms |
+| `make clean` | Remove all generated files |
+| `make test` | Run tests |
+| `make help` | Display help information |
+
+Each build command creates both server and client binaries for the specified platform. The binaries are named with platform identifiers (e.g., `kvapi-linux-amd64`, `kvclient-windows-amd64.exe`).
+
+### Binary Optimization
+
+The build process:
+1. Strips debugging symbols using Go compiler flags (`-s -w`)
+2. Applies UPX compression if available (using `--fast` mode)
+3. Ensures consistent versioning during the build process
+
+Example:
+```bash
+# Clean and build for Linux
+make clean && make build-linux
+
+# Build for all platforms
+make build-all
+```
