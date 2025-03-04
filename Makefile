@@ -48,11 +48,16 @@ define build_platform
 	@echo "Building $(CLIENT_NAME) for $(1) $(2) $(3) version $(VERSION) ($(GIT_COMMIT))..."
 	CGO_ENABLED=0 GOOS=$(1) GOARCH=$(2) $(GOBUILD) -ldflags="$(LD_FLAGS)" -o $(CLIENT_NAME)-$(1)-$(2)$(4) -v ./cmd/kvclient
 	@if [ "$(UPX_ENABLED)" = "true" ]; then \
-		echo "Compressing binaries with UPX..."; \
-		$(UPX_COMMAND) --fast $(APP_NAME)-$(1)-$(2)$(4) $(CLIENT_NAME)-$(1)-$(2)$(4); \
+		if [ "$(1)" = "darwin" ]; then \
+			echo "Skipping UPX compression for macOS binaries (not supported)..."; \
+		else \
+			echo "Compressing binaries with UPX..."; \
+			$(UPX_COMMAND) --fast $(APP_NAME)-$(1)-$(2)$(4) $(CLIENT_NAME)-$(1)-$(2)$(4) || echo "UPX compression failed, but continuing build..."; \
+		fi; \
 	else \
 		echo "UPX not found. Skipping compression."; \
 	fi
+	@rm -f $(BUILD_ID_FILE)
 	@touch .last_build_success
 endef
 
@@ -60,22 +65,18 @@ endef
 .PHONY: build-linux
 build-linux:
 	$(call build_platform,linux,amd64,64-bit,)
-	@rm -f $(BUILD_ID_FILE)
 
 .PHONY: build-windows
 build-windows:
 	$(call build_platform,windows,amd64,64-bit,.exe)
-	@rm -f $(BUILD_ID_FILE)
 
 .PHONY: build-osx
 build-osx:
 	$(call build_platform,darwin,amd64,64-bit,)
-	@rm -f $(BUILD_ID_FILE)
 
 .PHONY: build-arm
 build-arm:
 	$(call build_platform,linux,arm64,ARM 64-bit,)
-	@rm -f $(BUILD_ID_FILE)
 
 # Build for current platform
 .PHONY: build

@@ -609,13 +609,19 @@ Each build command creates both server and client binaries for the specified pla
 The build process:
 1. Strips debugging symbols using Go compiler flags (`-s -w`)
 2. Applies UPX compression if available (using `--fast` mode)
+   - Note: macOS binaries are not compressed with UPX (not supported)
+   - Linux, Windows, and ARM binaries are compressed if UPX is available
 3. Ensures consistent versioning during the build process
+4. Cleanup occurs automatically - temporary files are removed after each build
 
 Example:
 ```bash
 # Clean and build for Linux
 make clean && make build-linux
 
-# Build for all platforms
+# Build for Windows
+make build-windows 
+
+# Build all platforms at once
 make build-all
 ```
