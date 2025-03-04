@@ -17,7 +17,16 @@ TIMESTAMP = $(shell printf '%x' $$(date +%s))
 VERSION ?= 0.1.$(TIMESTAMP)
 BUILD_TIME = $(shell date +%FT%T%z)
 GIT_COMMIT = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-LD_FLAGS = -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'
+# Add -s -w flags to strip debugging symbols and reduce binary size
+LD_FLAGS = -s -w -X 'main.Version=$(VERSION)' -X 'main.BuildTime=$(BUILD_TIME)' -X 'main.GitCommit=$(GIT_COMMIT)'
+
+# Check if UPX is available
+UPX_COMMAND = $(shell command -v upx 2> /dev/null)
+ifdef UPX_COMMAND
+	UPX_ENABLED = true
+else
+	UPX_ENABLED = false
+endif
 
 # Default listen address and port
 LISTEN_ADDR ?= :8080
@@ -33,24 +42,48 @@ all: test build
 build:
 	@echo "Building $(APP_NAME) version $(VERSION) ($(GIT_COMMIT))..."
 	$(GOBUILD) -ldflags="$(LD_FLAGS)" -o $(BINARY_NAME) -v
+ifeq ($(UPX_ENABLED), true)
+	@echo "Compressing $(BINARY_NAME) with UPX..."
+	$(UPX_COMMAND) --fast $(BINARY_NAME)
+else
+	@echo "UPX not found. Skipping compression for $(BINARY_NAME)."
+endif
 
 # Build for Linux
 .PHONY: build-linux
 build-linux:
 	@echo "Building $(APP_NAME) for Linux version $(VERSION) ($(GIT_COMMIT))..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="$(LD_FLAGS)" -o $(BINARY_UNIX) -v
+ifeq ($(UPX_ENABLED), true)
+	@echo "Compressing $(BINARY_UNIX) with UPX..."
+	$(UPX_COMMAND) --fast $(BINARY_UNIX)
+else
+	@echo "UPX not found. Skipping compression for $(BINARY_UNIX)."
+endif
 
 # Build the client application
 .PHONY: build-client
 build-client:
 	@echo "Building $(CLIENT_NAME) version $(VERSION) ($(GIT_COMMIT))..."
 	$(GOBUILD) -ldflags="$(LD_FLAGS)" -o $(CLIENT_BINARY_NAME) -v ./cmd/kvclient
+ifeq ($(UPX_ENABLED), true)
+	@echo "Compressing $(CLIENT_BINARY_NAME) with UPX..."
+	$(UPX_COMMAND) --fast $(CLIENT_BINARY_NAME)
+else
+	@echo "UPX not found. Skipping compression for $(CLIENT_BINARY_NAME)."
+endif
 
 # Build the client for Linux
 .PHONY: build-client-linux
 build-client-linux:
 	@echo "Building $(CLIENT_NAME) for Linux version $(VERSION) ($(GIT_COMMIT))..."
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) -ldflags="$(LD_FLAGS)" -o $(CLIENT_BINARY_UNIX) -v ./cmd/kvclient
+ifeq ($(UPX_ENABLED), true)
+	@echo "Compressing $(CLIENT_BINARY_UNIX) with UPX..."
+	$(UPX_COMMAND) --fast $(CLIENT_BINARY_UNIX)
+else
+	@echo "UPX not found. Skipping compression for $(CLIENT_BINARY_UNIX)."
+endif
 
 # Build both server and client
 .PHONY: build-all
@@ -98,11 +131,23 @@ run-local:
 	@echo "Running $(APP_NAME) with localhost restriction..."
 	$(MAKE) ALLOWED_CIDR=127.0.0.1/32 run
 
-# Run with silent firewall simulation (localhost only)
+# Run with drop firewall simulation (localhost only)
+.PHONY: run-fw-drop
+run-fw-drop:
+	@echo "Running $(APP_NAME) with DROP firewall simulation (localhost only)..."
+	$(MAKE) ALLOWED_CIDR=127.0.0.1/32 ARGS="--fw-drop" run
+
+# Run with reject firewall simulation (localhost only)
+.PHONY: run-fw-reject
+run-fw-reject:
+	@echo "Running $(APP_NAME) with REJECT firewall simulation (localhost only)..."
+	$(MAKE) ALLOWED_CIDR=127.0.0.1/32 ARGS="--fw-reject" run
+
+# For backward compatibility (deprecated, will be removed in future release)
 .PHONY: run-firewall
 run-firewall:
-	@echo "Running $(APP_NAME) with firewall simulation (localhost only)..."
-	$(MAKE) ALLOWED_CIDR=127.0.0.1/32 SIMULATE_FIREWALL=true run
+	@echo "Running $(APP_NAME) with firewall simulation (localhost only) - DEPRECATED, use run-fw-drop instead..."
+	$(MAKE) ALLOWED_CIDR=127.0.0.1/32 ARGS="--simulate-firewall" run
 
 # Run tests
 .PHONY: test

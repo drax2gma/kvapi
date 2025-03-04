@@ -46,8 +46,8 @@ type StatusInfo struct {
 
 // AccessControl represents settings for controlling access to the API
 type AccessControl struct {
-	AllowedCIDR      *net.IPNet
-	SimulateFirewall bool
+	AllowedCIDR  *net.IPNet
+	FirewallMode string // Can be "ACCEPT", "REJECT", or "DROP"
 }
 
 // APIResponse represents the standardized JSON response format
@@ -182,10 +182,33 @@ func accessMiddleware(ac *AccessControl, next http.HandlerFunc) http.HandlerFunc
 
 		// Check if IP is allowed
 		if !ac.AllowedCIDR.Contains(ip) {
-			// IP is not in allowed CIDR range - explicit reject with 403 Forbidden
-			logMessage(r.Method, r.URL.Path, ip.String(), "Access denied (IP not in allowed CIDR)", true, http.StatusForbidden)
-			sendJSONResponse(w, http.StatusForbidden, "Access denied: Your IP is not in the allowed range", "", "", nil)
-			return
+			// IP is not in allowed CIDR range - handle according to firewall mode
+			switch ac.FirewallMode {
+			case "DROP":
+				// Simulate firewall DROP behavior but still log the attempt
+				logMessage(r.Method, r.URL.Path, ip.String(), "DROPPED (fw-drop mode) - IP not in allowed CIDR", true, 0)
+				// Don't respond to the client - terminate the connection silently
+				// Using hijack to close the connection without sending a response
+				hj, ok := w.(http.Hijacker)
+				if ok {
+					conn, _, _ := hj.Hijack()
+					if conn != nil {
+						conn.Close()
+					}
+				}
+				return
+			case "REJECT":
+				// Simulate firewall REJECT behavior - actively refuse the connection
+				logMessage(r.Method, r.URL.Path, ip.String(), "REJECTED (fw-reject mode) - IP not in allowed CIDR", true, http.StatusForbidden)
+				// Send a "Connection Refused" type response
+				sendJSONResponse(w, http.StatusForbidden, "Connection rejected by firewall: Your IP is not in the allowed range", "", "", nil)
+				return
+			default: // "ACCEPT" or any other value - standard 403 response
+				// IP is not in allowed CIDR range - explicit reject with 403 Forbidden
+				logMessage(r.Method, r.URL.Path, ip.String(), "Access denied (IP not in allowed CIDR)", true, http.StatusForbidden)
+				sendJSONResponse(w, http.StatusForbidden, "Access denied: Your IP is not in the allowed range", "", "", nil)
+				return
+			}
 		}
 
 		// IP is allowed, proceed to next handler
@@ -230,9 +253,13 @@ func main() {
 	// Parse command line arguments
 	listenAddr := flag.String("listen", ":8080", "Address and port to listen on (format: addr:port)")
 	allowedCIDR := flag.String("allowed-cidr", "", "CIDR range for allowed IPs (e.g., 192.168.1.0/24). If not set, all IPs are allowed")
-	simulateFirewall := flag.Bool("simulate-firewall", false, "If set, silently drops requests from non-allowed IPs (like a firewall DROP policy)")
+	fwDrop := flag.Bool("fw-drop", false, "If set, silently drops requests from non-allowed IPs (like a firewall DROP policy, with timeout)")
+	fwReject := flag.Bool("fw-reject", false, "If set, actively rejects connections from non-allowed IPs (like a firewall REJECT policy)")
 	udpMode := flag.Bool("udp", false, "Enable UDP mode instead of HTTP mode")
 	showVersion := flag.Bool("version", false, "Show version information and exit")
+
+	// For backward compatibility - to be deprecated
+	simulateFirewall := flag.Bool("simulate-firewall", false, "Deprecated: Please use --fw-drop instead")
 
 	// Override the default usage message
 	flag.Usage = func() {
@@ -282,15 +309,23 @@ func main() {
 		}
 		ac.AllowedCIDR = ipNet
 		fmt.Printf("  - Restricted to CIDR: %s\n", *allowedCIDR)
-		if *simulateFirewall {
+
+		// Handle firewall flags (set the FirewallMode to the appropriate value)
+		// Support backward compatibility with --simulate-firewall as well
+		if *fwDrop || *simulateFirewall {
 			fmt.Printf("  - Firewall behavior: SILENTLY DROP non-matching IPs ⚠️\n")
-			ac.SimulateFirewall = true
+			ac.FirewallMode = "DROP"
+		} else if *fwReject {
+			fmt.Printf("  - Firewall behavior: ACTIVELY REJECT non-matching IPs ⚠️\n")
+			ac.FirewallMode = "REJECT"
 		} else {
-			fmt.Printf("  - Non-matching IPs: 403 Forbidden response\n")
+			fmt.Printf("  - Firewall behavior: 403 Forbidden response\n")
+			ac.FirewallMode = "ACCEPT"
 		}
 	} else {
 		fmt.Printf("  - All IP addresses allowed (no restrictions) ⚠️\n")
 		fmt.Printf("  - Firewall behavior: ACCEPT ALL\n")
+		ac.FirewallMode = "ACCEPT"
 	}
 
 	// Resource limits
@@ -306,7 +341,7 @@ func main() {
 	// Start server based on mode
 	if *udpMode {
 		// Start UDP server
-		fmt.Println("📡 UDP server is ready to accept connections! Press Ctrl+C to stop.\n")
+		fmt.Println("📡 UDP server is ready to accept connections! Press Ctrl+C to stop.")
 		startUDPServer(*listenAddr, kvs, &ac)
 	} else {
 		// Continue with HTTP server setup
@@ -436,7 +471,7 @@ func main() {
 		})
 
 		// Start server with our custom handler
-		fmt.Println("📡 HTTP server is ready to accept connections! Press Ctrl+C to stop.\n")
+		fmt.Println("📡 HTTP server is ready to accept connections! Press Ctrl+C to stop.")
 		log.Fatal(http.ListenAndServe(*listenAddr, handler))
 	}
 }
@@ -449,14 +484,32 @@ func handleUDPCommand(command string, addr net.Addr, kvs *KeyValueStore, ac *Acc
 
 	// Check IP restrictions if CIDR is set
 	if ac.AllowedCIDR != nil && !ac.AllowedCIDR.Contains(ip) {
-		logMessage("UDP", "command", ipStr, "Access denied (IP not in allowed CIDR)", true, http.StatusForbidden)
-		response := APIResponse{
-			Status:    http.StatusForbidden,
-			Message:   "Access denied: Your IP is not in the allowed range",
-			TimeStamp: time.Now().Format(time.RFC3339),
+		// Handle based on firewall mode
+		switch ac.FirewallMode {
+		case "DROP":
+			// Log the dropped packet but return nil (no response)
+			logMessage("UDP", "command", ipStr, "DROPPED (fw-drop mode) - IP not in allowed CIDR", true, 0)
+			return nil
+		case "REJECT":
+			// Log the rejected packet and send a rejection response
+			logMessage("UDP", "command", ipStr, "REJECTED (fw-reject mode) - IP not in allowed CIDR", true, http.StatusForbidden)
+			response := APIResponse{
+				Status:    http.StatusForbidden,
+				Message:   "Connection rejected by firewall: Your IP is not in the allowed range",
+				TimeStamp: time.Now().Format(time.RFC3339),
+			}
+			jsonResponse, _ := json.Marshal(response)
+			return jsonResponse
+		default: // "ACCEPT" or any other value
+			logMessage("UDP", "command", ipStr, "Access denied (IP not in allowed CIDR)", true, http.StatusForbidden)
+			response := APIResponse{
+				Status:    http.StatusForbidden,
+				Message:   "Access denied: Your IP is not in the allowed range",
+				TimeStamp: time.Now().Format(time.RFC3339),
+			}
+			jsonResponse, _ := json.Marshal(response)
+			return jsonResponse
 		}
-		jsonResponse, _ := json.Marshal(response)
-		return jsonResponse
 	}
 
 	// Split the command into parts

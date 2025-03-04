@@ -11,6 +11,7 @@ The application is a simple HTTP REST API server that allows storing key-value p
 - Go 1.21 or newer version
 - The specified address and port must be available (by default port 8080 on all interfaces)
 - GNU Make (to use the Makefile)
+- UPX (optional, for binary compression)
 
 ## Version Information
 
@@ -74,6 +75,12 @@ make ALLOWED_CIDR=192.168.0.0/16 run
 # Start the application with access restricted to local machine only
 make ALLOWED_CIDR=127.0.0.1/32 run
 
+# Start the application with DROP firewall simulation
+make ARGS="--fw-drop --allowed-cidr=127.0.0.1/32" run
+
+# Start the application with REJECT firewall simulation
+make ARGS="--fw-reject --allowed-cidr=127.0.0.1/32" run
+
 # Start the application in UDP mode
 make ARGS="--udp" run
 
@@ -81,8 +88,10 @@ make ARGS="--udp" run
 make ARGS="--udp --listen :4000" run
 
 # Or use the built-in profiles:
-make run-secure  # Local network only (192.168.0.0/16)
-make run-local   # Localhost only (127.0.0.1/32)
+make run-secure    # Local network only (192.168.0.0/16)
+make run-local     # Localhost only (127.0.0.1/32)
+make run-fw-drop   # Localhost only with DROP firewall simulation
+make run-fw-reject # Localhost only with REJECT firewall simulation
 
 # Or directly:
 ./kvapi --listen :8080
@@ -163,8 +172,32 @@ The application can be stopped using the CTRL+C key combination or by sending th
 
 The application provides the ability to restrict access to a specific IP address range (in CIDR format). If a request comes from an IP address that is not within the allowed range:
 
-- The request is rejected with a `403 Forbidden` status code
-- The rejected request appears in yellow in the console
+- Default mode: The request is rejected with a `403 Forbidden` status code, and appears in yellow in the console
+- Two additional firewall simulation modes are available: `DROP` and `REJECT`
+
+### Firewall Simulation Modes
+
+The server supports two distinct firewall simulation modes that mimic real-world firewall behavior:
+
+#### 1. DROP Mode (`--fw-drop`)
+
+When started with the `--fw-drop` flag, the server behaves like a firewall with a DROP policy:
+
+- Non-matching IP addresses receive no response (connection timeout)
+- Client will experience waiting until connection timeout
+- All dropped packets are still logged to the console for monitoring
+- Log entries will include "DROPPED (fw-drop mode)" and appear in yellow
+- This simulates a true firewall DROP behavior
+
+#### 2. REJECT Mode (`--fw-reject`)
+
+When started with the `--fw-reject` flag, the server behaves like a firewall with a REJECT policy:
+
+- Non-matching IP addresses receive an immediate rejection response
+- Client receives a clear "Connection rejected by firewall" message
+- All rejected packets are logged to the console for monitoring
+- Log entries will include "REJECTED (fw-reject mode)" and appear in yellow
+- This simulates a firewall that actively refuses connections with ICMP or TCP RST
 
 ### Examples of CIDR ranges:
 - `127.0.0.1/32` - Only localhost (exclusively local machine)
@@ -189,6 +222,8 @@ The project's Makefile supports the following commands:
 | `make run` | Run the server (default port `:8080`) |
 | `make run-secure` | Run the server with access restricted to local network (192.168.0.0/16) |
 | `make run-local` | Run the server with access restricted to local machine (127.0.0.1/32) |
+| `make run-fw-drop` | Run with DROP firewall mode (silently drops non-matching IPs) |
+| `make run-fw-reject` | Run with REJECT firewall mode (actively rejects non-matching IPs) |
 | `make test` | Run tests |
 | `make deps` | Install dependencies |
 | `make install` | Install the server to the GOPATH/bin directory |
@@ -204,6 +239,22 @@ make LISTEN_ADDR=:3000 ALLOWED_CIDR=10.0.0.0/8 run      # Run server with custom
 make VERSION=0.2.custom build-all                        # Build with custom version
 make build-all                                           # Build both server and client
 ```
+
+### Binary Compression with UPX
+
+The build process automatically detects if UPX (Ultimate Packer for eXecutables) is installed on your system. If found, it will compress the binaries to reduce their size:
+
+- No configuration needed - compression happens automatically if UPX is available
+- Uses the `--fast` compression level for quick builds with good compression ratio
+- The build process first strips debugging symbols with Go compiler flags (`-s -w`)
+- Compressed binaries maintain full functionality while being significantly smaller
+- Ideal for distribution and deployment scenarios with limited storage
+- To install UPX:
+  - Ubuntu/Debian: `sudo apt-get install upx-ucl`
+  - CentOS/RHEL: `sudo yum install upx`
+  - macOS: `brew install upx`
+
+If UPX is not available, the build process continues normally with uncompressed binaries (still optimized for size).
 
 ## Response Format
 
